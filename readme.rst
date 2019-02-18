@@ -235,13 +235,6 @@ TODO
     USB transfer completion, asyncio task cancel, libusb backend
     handling on cancelled transfer).
 
-* Better OOP
-
-  * Rework control endpoint API.
-
-  * Provide handle objects (not only descriptors) for Interface,
-    Setting, use them for control requests.
-
 License
 =======
 

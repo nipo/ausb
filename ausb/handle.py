@@ -1,11 +1,13 @@
 import asyncio
 import usb1
 from . import exception
+from .constant import *
 
 class Device:
     """
     Opened device handle. This object should be spawned by DeviceDescriptor.open().
     """
+
     def __init__(self, context, descriptor, handle):
         self.context = context
         self.descriptor = descriptor
@@ -120,25 +122,52 @@ class Device:
             except:
                 pass
             raise
-    
-    async def write(self, type, request, value, index, data):
+
+    async def control(self, type, recipient, request, value, index, data_or_length):
         """
-        Control OUT request.
+        Raw control IN/OUT request targetted on device.
         """
+        bmRequestType = RequestType.pack(RequestTypeDirection.DeviceToHost
+                                if isinstance(data_or_length, int) else
+                                RequestTypeDirection.HostToDevice,
+                                type,
+                                recipient)
+
         transfer = self.handle.getTransfer()
-        type = (type & ~usb1.ENDPOINT_DIR_MASK) | usb1.ENDPOINT_OUT
-        transfer.setControl(type, request, value, index, data)
+        transfer.setControl(bmRequestType, request, value, index, data_or_length)
         return await self._transfer_run(transfer)
 
-    async def read(self, type, request, value, index, size):
+    async def standard_control(self, request, value, index, data_or_length):
         """
-        Control IN request.
-        :returns: input data buffer, if any.
+        Standard control IN/OUT request targetted on device.
         """
-        transfer = self.handle.getTransfer()
-        type = (type & ~usb1.ENDPOINT_DIR_MASK) | usb1.ENDPOINT_IN
-        transfer.setControl(type, request, value, index, size)
-        return await self._transfer_run(transfer)
+        return await self.control(RequestTypeType.Standard,
+                                  RequestTypeRecipient.Device,
+                                  request, value, index, data_or_length)
+
+    async def class_control(self, request, value, index, data_or_length):
+        """
+        Standard control IN/OUT request targetted on device.
+        """
+        return await self.control(RequestTypeType.Class,
+                                  RequestTypeRecipient.Device,
+                                  request, value, index, data_or_length)
+
+    async def vendor_control(self, request, value, index, data_or_length):
+        """
+        Vendor-specific control IN/OUT request targetted on device.
+        """
+        return await self.control(RequestTypeType.Vendor,
+                                  RequestTypeRecipient.Device,
+                                  request, value, index, data_or_length)
+
+    async def clear_feature(self, feature_selector):
+        return await self.standard_control(Request.ClearFeature, feature_selector,
+                                           0, b'')
+
+    async def set_feature(self, feature_selector):
+        return await self.standard_control(Request.ClearFeature, feature_selector,
+                                           0, b'')
     
 class Interface:
     """
@@ -182,6 +211,38 @@ class Interface:
         """
         self.device.attachKernelDriver(self.interface)
 
+    async def standard_control(self, request, value, data_or_length):
+        """
+        Standard control IN/OUT request targetted on interface.
+        """
+        return await self.control(RequestTypeType.Standard,
+                                  RequestTypeRecipient.Interface,
+                                  request, value, self.interface, data_or_length)
+
+    async def class_control(self, request, value, data_or_length):
+        """
+        Standard control IN/OUT request targetted on interface.
+        """
+        return await self.control(RequestTypeType.Class,
+                                  RequestTypeRecipient.Interface,
+                                  request, value, self.interface, data_or_length)
+
+    async def vendor_control(self, request, value, data_or_length):
+        """
+        Vendor-specific control IN/OUT request targetted on interface.
+        """
+        return await self.control(RequestTypeType.Vendor,
+                                  RequestTypeRecipient.Interface,
+                                  request, value, self.interface, data_or_length)
+
+    async def clear_feature(self, feature_selector):
+        return await self.standard_control(Request.ClearFeature, feature_selector,
+                                           b'')
+
+    async def set_feature(self, feature_selector):
+        return await self.standard_control(Request.ClearFeature, feature_selector,
+                                           b'')
+
     def open(self, endpoint):
         """
         Get an Endpoint handle for an EndpointDescriptor.
@@ -220,6 +281,38 @@ class Endpoint:
         Resume servicing endpoint, clears halt condition.
         """
         self.device.handle.clearHalt(self.address)
+
+    async def standard_control(self, request, value, data_or_length):
+        """
+        Standard control IN/OUT request targetted on endpoint.
+        """
+        return await self.control(RequestTypeType.Standard,
+                                  RequestTypeRecipient.Endpoint,
+                                  request, value, self.address, data_or_length)
+
+    async def class_control(self, request, value, data_or_length):
+        """
+        Standard control IN/OUT request targetted on endpoint.
+        """
+        return await self.control(RequestTypeType.Class,
+                                  RequestTypeRecipient.Endpoint,
+                                  request, value, self.address, data_or_length)
+
+    async def vendor_control(self, request, value, data_or_length):
+        """
+        Vendor-specific control IN/OUT request targetted on endpoint.
+        """
+        return await self.control(RequestTypeType.Vendor,
+                                  RequestTypeRecipient.Endpoint,
+                                  request, value, self.address, data_or_length)
+
+    async def clear_feature(self, feature_selector):
+        return await self.standard_control(Request.ClearFeature, feature_selector,
+                                           b'')
+
+    async def set_feature(self, feature_selector):
+        return await self.standard_control(Request.ClearFeature, feature_selector,
+                                           b'')
         
 class BulkEndpoint(Endpoint):
     pass

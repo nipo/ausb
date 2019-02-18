@@ -117,8 +117,8 @@ class Context:
         try:
             d, = matching
             return d
-        except UnpackError:
-            raise ValueError("More than one device matching")
+        except ValueError:
+            raise ValueError("Not exactly one device matching")
 
     def __iter__(self):
         """
