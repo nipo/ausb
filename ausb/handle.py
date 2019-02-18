@@ -12,6 +12,15 @@ class Device:
         self.context = context
         self.descriptor = descriptor
         self.handle = handle
+        self.ports = descriptor.ports
+
+    def reopen(self):
+        ports = self.descriptor.ports
+        self.descriptor = None
+        self.handle = None
+        next_desc = self.context.device_get(ports = ports)
+        self.descriptor = next_desc
+        self.handle = next_desc.device.open()
 
     @property
     def configuration(self):
