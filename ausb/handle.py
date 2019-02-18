@@ -12,13 +12,13 @@ class Device:
         self.context = context
         self.descriptor = descriptor
         self.handle = handle
-        self.ports = descriptor.ports
 
     def reopen(self):
         ports = self.descriptor.ports
+        bus = self.descriptor.bus
         self.descriptor = None
         self.handle = None
-        next_desc = self.context.device_get(ports = ports)
+        next_desc = self.context.device_get(ports = ports, bus = bus)
         self.descriptor = next_desc
         self.handle = next_desc.device.open()
 
