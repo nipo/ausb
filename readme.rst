@@ -24,7 +24,9 @@ asyncio event loop.
 Device discovery
 ----------------
 
-A basic lsusb substitute is as simple as::
+A basic lsusb substitute is as simple as:
+
+.. code:: python
 
   import asyncio
   import ausb
@@ -47,7 +49,9 @@ A basic lsusb substitute is as simple as::
       t = loop.create_task(ausb_list(loop))
       loop.run_until_complete(t)
 
-Sample::
+Sample:
+
+.. code:: shell
 
   $ python3 -m ausb.tool.list
   Bus 020 Device 010: ID 05ac:8289 Apple Inc. Bluetooth USB Host Controller
@@ -60,12 +64,16 @@ devices in the system.
 Context also allows to retrieve:
 
 * the only matching device by some criteria (exception is raised if
-  more than one matches)::
+  more than one matches):
+
+  .. code:: python
 
     my_ft2232hl = ctx.device_get(vendor_id = 0x0403, product_id = 0x6010)
 
 * any of matching devices (device returned not guaranteed if more than
-  one matches)::
+  one matches):
+
+  .. code:: python
 
     some_hub = ctx.device_get_any(classes = (0x09, 0x00))
 
@@ -80,7 +88,9 @@ For a given device, USB descriptors are organized as a treee, as follows::
         Alternate Settings
           Endpoints
 
-ausb descriptor object model follows this::
+ausb descriptor object model follows this:
+
+.. code:: python
 
   import asyncio
   import ausb
@@ -109,7 +119,9 @@ ausb descriptor object model follows this::
       t = loop.create_task(ausb_dev_info(loop, int(sys.argv[1], 16), int(sys.argv[2], 16)))
       loop.run_until_complete(t)
 
-Sample usage::
+Sample usage:
+
+.. code:: shell
 
   $ python3 -m ausb.tool.dev_info 05ac 025a
   Bus 020 Device 007: ID 05ac:025a v.224 usb v.200 speed 2
@@ -130,13 +142,17 @@ Opening a device
 
 A device descriptor object (as spawned by Context, either from
 iteration or getting device by its IDs) is the entry point for device
-access::
+access:
+
+.. code:: python
 
   ctx = Context(loop)
   my_ft2232hl = ctx.device_get(vendor_id = 0x0403, product_id = 0x6010)
   device_handle = my_ft2232hl.open()
 
-Device handle object allows to do control-endpoint requests::
+Device handle object allows to do control-endpoint requests:
+
+.. code:: python
 
   # Control OUT
   await device_handle.write(type, request, value, index, data)
@@ -144,7 +160,9 @@ Device handle object allows to do control-endpoint requests::
   # Control IN
   data = await device_handle.read(type, request, value, index, size)
 
-Device handle also allows to open an interface::
+Device handle also allows to open an interface:
+
+.. code:: python
 
   interface_handle = device_handle.interface_claim(0)
 
@@ -159,7 +177,9 @@ descriptors.  There are two main possibilities:
 
 * Walk the Interface/Setting hierarchy.
 
-The fastest way::
+The fastest way:
+
+.. code:: python
 
   endpoint_descriptor = interface_handle.descriptor[0].endpoint_by_address(0x81)
   endpoint_handle = interface_handle.open(endpoint_descriptor)
@@ -179,7 +199,9 @@ Timeouts, cancellation
 
 Timeouts are hidden from the API because they are merged with Asyncio
 functionality.  Cancellation on read/write cancels the underlying
-transfer, in a way you may write::
+transfer, in a way you may write:
+
+.. code:: python
 
   try:
      data = await asyncio.wait_for(endpoint_handle.read(size), timeout = 1.5)
