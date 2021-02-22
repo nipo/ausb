@@ -33,6 +33,7 @@ class ContextNotifier:
         """
         self.context.setPollFDNotifiers()
         self.done.set()
+        self.fd_ready.set()
 
     @staticmethod
     def _fd_register(fd, events, self):
