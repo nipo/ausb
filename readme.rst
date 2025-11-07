@@ -24,29 +24,27 @@ asyncio event loop.
 Device discovery
 ----------------
 
-A basic lsusb substitute is as simple as:
-
-.. code:: python
+A basic lsusb substitute is as simple as::
 
   import asyncio
   import ausb
   
-  async def ausb_list(loop):
-      ctx = ausb.Context(loop)
-      for dev in ctx:
-          try:
-              product = dev.product
-              manufacturer = dev.manufacturer
-          except:
-              product = ""
-              manufacturer = ""
-          print("Bus %03d Device %03d: ID %04x:%04x %s %s" % (
-              dev.bus, dev.address, dev.vendor_id, dev.product_id,
-              manufacturer, product))
-      
+  async def ausb_list():
+      async with ausb.Context() as ctx:
+          for dev in ctx:
+              try:
+                  product = dev.product
+                  manufacturer = dev.manufacturer
+              except:
+                  product = ""
+                  manufacturer = ""
+              print("Bus %03d Device %03d: ID %04x:%04x %s %s" % (
+                  dev.bus, dev.address, dev.vendor_id, dev.product_id,
+                  manufacturer, product))
+          
   if __name__ == "__main__":
       loop = asyncio.get_event_loop()
-      t = loop.create_task(ausb_list(loop))
+      t = loop.create_task(ausb_list())
       loop.run_until_complete(t)
 
 Sample:
@@ -88,71 +86,47 @@ For a given device, USB descriptors are organized as a treee, as follows::
         Alternate Settings
           Endpoints
 
-ausb descriptor object model follows this:
-
-.. code:: python
+ausb descriptor object model follows this::
 
   import asyncio
   import ausb
 
-  async def ausb_dev_info(loop, vid, pid):
-      c = ausb.Context(loop)
-      device = c.device_get(vendor_id = vid, product_id = pid)
-      
-      print("Bus %03d Device %03d: ID %04x:%04x v.%03x usb v.%03x speed %d" % (
-          device.bus, device.address, device.vendor_id, device.product_id,
-          device.device_version, device.usb_version, device.speed))
-      print(" Control Endpoint 00, MPS=%d" % (
-          device.max_packet_size0))
-      for cno, configuration in enumerate(device.configurations):
-          print(" Configuration #%d" % (configuration.number))
-          for ino, interface in enumerate(configuration):
-              print("  Interface #%d" % (ino))
-              for sno, setting in enumerate(interface):
-                  print("   Alternate Setting %d" % (sno))
-                  for endpoint in setting:
-                      print("    %s %s Endpoint %02x, MPS=%d, interval=%d" % (endpoint.type.capitalize(), endpoint.direction.capitalize(), endpoint.number, endpoint.max_packet_size, endpoint.interval))
+  async def ausb_dev_info(vid, pid):
+      async with ausb.Context() as c:
+          device = c.device_get(vendor_id = vid, product_id = pid)
+          
+          print("Bus %03d Device %03d: ID %04x:%04x v.%03x usb v.%03x speed %d" % (
+              device.bus, device.address, device.vendor_id, device.product_id,
+              device.device_version, device.usb_version, device.speed))
+          print(" Control Endpoint 00, MPS=%d" % (
+              device.max_packet_size0))
+          for cno, configuration in enumerate(device.configurations):
+              print(" Configuration #%d" % (configuration.number))
+              for ino, interface in enumerate(configuration):
+                  print("  Interface #%d" % (ino))
+                  for sno, setting in enumerate(interface):
+                      print("   Alternate Setting %d" % (sno))
+                      for endpoint in setting:
+                          print("    %s %s Endpoint %02x, MPS=%d, interval=%d" % (endpoint.type.capitalize(), endpoint.direction.capitalize(), endpoint.number, endpoint.max_packet_size, endpoint.interval))
   
   if __name__ == "__main__":
       import sys
       loop = asyncio.get_event_loop()
-      t = loop.create_task(ausb_dev_info(loop, int(sys.argv[1], 16), int(sys.argv[2], 16)))
+      t = loop.create_task(ausb_dev_info(int(sys.argv[1], 16), int(sys.argv[2], 16)))
       loop.run_until_complete(t)
-
-Sample usage:
-
-.. code:: shell
-
-  $ python3 -m ausb.tool.dev_info 05ac 025a
-  Bus 020 Device 007: ID 05ac:025a v.224 usb v.200 speed 2
-   Control Endpoint 00, MPS=8
-   Configuration #1
-    Interface #0
-     Alternate Setting 0
-      Interrupt In Endpoint 03, MPS=10, interval=8
-    Interface #1
-     Alternate Setting 0
-      Interrupt In Endpoint 01, MPS=64, interval=2
-    Interface #2
-     Alternate Setting 0
-      Interrupt In Endpoint 04, MPS=8, interval=8
 
 Opening a device
 ----------------
 
 A device descriptor object (as spawned by Context, either from
 iteration or getting device by its IDs) is the entry point for device
-access:
+access::
 
-.. code:: python
+  async with Context(loop) as ctx:
+      my_ft2232hl = ctx.device_get(vendor_id = 0x0403, product_id = 0x6010)
+      device_handle = my_ft2232hl.open()
 
-  ctx = Context(loop)
-  my_ft2232hl = ctx.device_get(vendor_id = 0x0403, product_id = 0x6010)
-  device_handle = my_ft2232hl.open()
-
-Device handle object allows to do control-endpoint requests:
-
-.. code:: python
+Device handle object allows to do control-endpoint requests::
 
   # Control OUT
   await device_handle.write(type, request, value, index, data)
@@ -160,9 +134,7 @@ Device handle object allows to do control-endpoint requests:
   # Control IN
   data = await device_handle.read(type, request, value, index, size)
 
-Device handle also allows to open an interface:
-
-.. code:: python
+Device handle also allows to open an interface::
 
   interface_handle = device_handle.interface_claim(0)
 
@@ -177,9 +149,7 @@ descriptors.  There are two main possibilities:
 
 * Walk the Interface/Setting hierarchy.
 
-The fastest way:
-
-.. code:: python
+The fastest way::
 
   endpoint_descriptor = interface_handle.descriptor[0].endpoint_by_address(0x81)
   endpoint_handle = interface_handle.open(endpoint_descriptor)
@@ -199,9 +169,7 @@ Timeouts, cancellation
 
 Timeouts are hidden from the API because they are merged with Asyncio
 functionality.  Cancellation on read/write cancels the underlying
-transfer, in a way you may write:
-
-.. code:: python
+transfer, in a way you may write::
 
   try:
      data = await asyncio.wait_for(endpoint_handle.read(size), timeout = 1.5)
@@ -246,8 +214,6 @@ TODO
     transfers, calling back some handler on reception).
 
   * Export protocol constants.
-
-  * Support hotplugging detection.
 
 * Asyncio enhancements
 
