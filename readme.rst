@@ -1,6 +1,6 @@
-=======================================================
- Python3.5+ Asyncio wrapper for usb1 module (libusb-1)
-=======================================================
+===================================================
+ Python Asyncio wrapper for usb1 module (libusb-1)
+===================================================
 
 This is an asyncio module for accessing USB devices.
 
