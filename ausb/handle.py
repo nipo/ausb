@@ -175,7 +175,7 @@ class Device:
                                            0, b'')
 
     async def set_feature(self, feature_selector):
-        return await self.standard_control(Request.ClearFeature, feature_selector,
+        return await self.standard_control(Request.SetFeature, feature_selector,
                                            0, b'')
     
 class Interface:
@@ -295,7 +295,7 @@ class Endpoint:
         """
         Standard control IN/OUT request targetted on endpoint.
         """
-        return await self.control(RequestTypeType.Standard,
+        return await self.device.control(RequestTypeType.Standard,
                                   RequestTypeRecipient.Endpoint,
                                   request, value, self.address, data_or_length)
 
@@ -303,7 +303,7 @@ class Endpoint:
         """
         Standard control IN/OUT request targetted on endpoint.
         """
-        return await self.control(RequestTypeType.Class,
+        return await self.device.control(RequestTypeType.Class,
                                   RequestTypeRecipient.Endpoint,
                                   request, value, self.address, data_or_length)
 
@@ -311,7 +311,7 @@ class Endpoint:
         """
         Vendor-specific control IN/OUT request targetted on endpoint.
         """
-        return await self.control(RequestTypeType.Vendor,
+        return await self.device.control(RequestTypeType.Vendor,
                                   RequestTypeRecipient.Endpoint,
                                   request, value, self.address, data_or_length)
 
