@@ -47,34 +47,6 @@ A basic lsusb substitute is as simple as::
       t = loop.create_task(ausb_list())
       loop.run_until_complete(t)
 
-Sample:
-
-.. code:: shell
-
-  $ python3 -m ausb.tool.list
-  Bus 020 Device 010: ID 05ac:8289 Apple Inc. Bluetooth USB Host Controller
-  Bus 020 Device 009: ID 0a5c:4500 Apple Inc. BRCM20702 Hub
-  Bus 020 Device 007: ID 05ac:025a Apple Inc. Apple Internal Keyboard / Trackpad
-
-Iteration over the context object retrieves descriptors for all
-devices in the system.
-
-Context also allows to retrieve:
-
-* the only matching device by some criteria (exception is raised if
-  more than one matches):
-
-  .. code:: python
-
-    my_ft2232hl = ctx.device_get(vendor_id = 0x0403, product_id = 0x6010)
-
-* any of matching devices (device returned not guaranteed if more than
-  one matches):
-
-  .. code:: python
-
-    some_hub = ctx.device_get_any(classes = (0x09, 0x00))
-
 Descriptor tree
 ---------------
 
@@ -190,6 +162,62 @@ There are 4 exception types that may happen on transfers:
 
 There is no preset timeout on transfers, so ausb does not spawn
 timeout errors on its own.
+
+Command line utilities
+======================
+
+Device list
+-----------
+
+This is an equivalent of well-known `lsusb` command::
+
+  $ ausb list
+  Bus 020 Device 010: ID 05ac:8289 Apple Inc. Bluetooth USB Host Controller
+  Bus 020 Device 009: ID 0a5c:4500 Apple Inc. BRCM20702 Hub
+  Bus 020 Device 007: ID 05ac:025a Apple Inc. Apple Internal Keyboard / Trackpad
+
+Sample usage::
+
+  $ ausb dev-info 05ac 025a
+  Bus 020 Device 007: ID 05ac:025a v.224 usb v.200 speed 2
+   Control Endpoint 00, MPS=8
+   Configuration #1
+    Interface #0
+     Alternate Setting 0
+      Interrupt In Endpoint 03, MPS=10, interval=8
+    Interface #1
+     Alternate Setting 0
+      Interrupt In Endpoint 01, MPS=64, interval=2
+    Interface #2
+     Alternate Setting 0
+      Interrupt In Endpoint 04, MPS=8, interval=8
+
+Device info
+-----------
+
+This shows basic descriptior tree::
+
+  $ ausb dev-info 0403 6011
+  Bus 001 Device 109: ID 0403:6011 v.800 usb v.200 speed 2
+   Device classes: 00 00
+   Control Endpoint 00, MPS=64
+   Configuration #1
+    Interface #0
+     Alternate Setting 0
+      Bulk In Endpoint 01, MPS=64, interval=0
+      Bulk Out Endpoint 02, MPS=64, interval=0
+    Interface #1
+     Alternate Setting 0
+      Bulk In Endpoint 03, MPS=64, interval=0
+      Bulk Out Endpoint 04, MPS=64, interval=0
+    Interface #2
+     Alternate Setting 0
+      Bulk In Endpoint 05, MPS=64, interval=0
+      Bulk Out Endpoint 06, MPS=64, interval=0
+    Interface #3
+     Alternate Setting 0
+      Bulk In Endpoint 07, MPS=64, interval=0
+      Bulk Out Endpoint 08, MPS=64, interval=0
 
 TODO
 ====

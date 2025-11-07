@@ -3,6 +3,7 @@ import usb1
 from select import POLLIN, POLLOUT
 from weakref import finalize
 from . import descriptor
+import enum
 
 __all__ = ["Context", "ConnectionEvent", "DisconnectionEvent"]
 

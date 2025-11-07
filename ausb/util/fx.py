@@ -2,7 +2,7 @@ import asyncio
 import enum
 import struct
 
-class FirmwareImage:
+class Fx3FirmwareImage:
     def __init__(self):
         self.segments = []
         self.entry_point = None
@@ -44,6 +44,43 @@ class FirmwareImage:
 
     def __iter__(self):
         return iter(self.segments)
+
+class Fx2FirmwareImage:
+    def __init__(self):
+        self.segments = []
+        self.entry_point = None
+
+    @classmethod
+    def from_file(cls, filename):
+        """Load a Program from a Cypress FX image file"""
+        if filename.endswith(".img.gz"):
+            import gzip
+            open_ = gzip.open
+        else:
+            open_ = open
+
+        with open(filename, 'rb') as fd:
+            header, vid, pid, did, one = struct.unpack("<BHHHB", fd.read(8))
+            if header != 0xc2:
+                raise ValueError("Bad file header")
+
+            self = cls()
+
+            while True:
+                ch = fd.read(4)
+                if not ch:
+                    break
+                size, address = struct.unpack("<HH", ch)
+                if size == 0:
+                    self.entry_point = address
+                    break
+                blob = fd.read(size)
+                self.segments.append((address, blob))
+
+            return self
+
+    def __iter__(self):
+        return iter(self.segments)
         
 class Fx:
     def __init__(self, handle):
@@ -63,6 +100,7 @@ class Fx:
                 chunk = data[off : off + self.CTRL_MAX_PACKET_SIZE]
 
                 await self.mem_rw(addr, chunk)
+                continue
                 readback = await self.mem_rw(addr, len(chunk))
 
                 if readback == chunk:
@@ -75,10 +113,10 @@ class Fx2(Fx):
         await self.mem_rw(0xe600, bytes([int(enabled)]))
 
     async def firmware_load(self, firmware):
-        self.handle.configuration = 0
+#        self.handle.configuration = 0
         await self.cpu_control(enabled = False)
         await self.memory_upload(firmware.segments)
-        await self.cpu_control(enabled = true)
+        await self.cpu_control(enabled = True)
         
 
 class Fx3(Fx):

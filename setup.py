@@ -11,6 +11,11 @@ setup(
         "Development Status :: 4 - Beta",
         "Programming Language :: Python",
     ],
+    entry_points={
+        'console_scripts': [
+            'ausb = ausb.cli:main',
+        ],
+    },
     packages = find_packages(),
-    install_requires = ["libusb1"],
+    install_requires = ["libusb1", "asyncclick"],
 )
