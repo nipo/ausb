@@ -115,7 +115,7 @@ class Device:
         """
         Internal method for handling transfers with Asyncio.
         """
-        transfer_done = self.context.loop.create_future()
+        transfer_done = asyncio.get_event_loop().create_future()
         transfer.transfer_done = transfer_done
         transfer.setCallback(self._on_transfer_done)
         try:
