@@ -1,5 +1,6 @@
 import asyncio
 import usb1
+from collections import deque
 from . import exception
 from .constant import *
 
@@ -337,6 +338,16 @@ class BulkInEndpoint(BulkEndpoint):
         transfer.setBulk(self.address, size)
         return await self.device._transfer_run(transfer)
 
+    def stream_reader(self, buffer_limit=65536):
+        """
+        Create a StreamReader wrapper for this endpoint.
+
+        :param buffer_limit: Maximum internal buffer size before pausing reads (default 64KB)
+        :returns: BulkStreamReader instance
+        """
+        from .stream import BulkStreamWriter
+        return BulkStreamReader(self, buffer_limit=buffer_limit)
+
 class BulkOutEndpoint(BulkEndpoint):
     async def write(self, data):
         """
@@ -345,6 +356,15 @@ class BulkOutEndpoint(BulkEndpoint):
         transfer = self.device.handle.getTransfer()
         transfer.setBulk(self.address, data)
         return await self.device._transfer_run(transfer)
+
+    def stream_writer(self):
+        """
+        Create a StreamWriter wrapper for this endpoint.
+
+        :returns: BulkStreamWriter instance
+        """
+        from .stream import BulkStreamWriter
+        return BulkStreamWriter(self)
 
 class InterruptEndpoint(Endpoint):
     def __init__(self, device, address, mps, interval):
