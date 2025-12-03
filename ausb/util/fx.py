@@ -85,8 +85,7 @@ class Fx2FirmwareImage:
 class Fx:
     def __init__(self, handle):
         self.handle = handle
-
-    CTRL_MAX_PACKET_SIZE = 4096
+        self.mps0 = self.handle.descriptor.max_packet_size0
 
     async def mem_rw(self, addr, data_or_length):
         return await self.handle.vendor_control(
@@ -95,9 +94,11 @@ class Fx:
     async def memory_upload(self, segments):
         for base_address, data in segments:
             off = 0
-            for off in range(0, len(data), self.CTRL_MAX_PACKET_SIZE):
+            for off in range(0, len(data), self.mps0):
                 addr = base_address + off
-                chunk = data[off : off + self.CTRL_MAX_PACKET_SIZE]
+                chunk = data[off : off + self.mps0]
+
+                print("mem up off %x %d" % (off, len(chunk)))
 
                 await self.mem_rw(addr, chunk)
                 continue
