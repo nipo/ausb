@@ -1,4 +1,12 @@
 import usb1
+import enum
+
+class Speed(enum.IntEnum):
+    Unknown = 0
+    Low = 1
+    Full = 2
+    High = 3
+    Super = 4
 
 class Device:
     """
@@ -103,7 +111,7 @@ class Device:
         Device MPS for Endpoint 0, in bytes
         """
         mps0 = self.device.getMaxPacketSize0()
-        if self.speed == 4:
+        if self.speed == Speed.Super:
             return 1 << mps0
         return mps0
 
@@ -154,7 +162,7 @@ class Device:
         """
         Device current connection speed
         """
-        return self.device.getDeviceSpeed()
+        return Speed(self.device.getDeviceSpeed())
 
     def open(self):
         """
