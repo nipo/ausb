@@ -1,0 +1,12 @@
+# Sphinx build artifacts
+build/
+
+# Sphinx auto-generated files
+source/_autosummary/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
