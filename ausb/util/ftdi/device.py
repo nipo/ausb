@@ -1,6 +1,7 @@
 """FTDI device and channel handles"""
 
-from .constant import ChipType, Request, ResetCtrl, Bitmode, Status
+from ...handle import Device
+from .constant import ChipType, Request, ResetCtrl, Bitmode, Status, Channel
 
 
 class Ftdi:
@@ -50,7 +51,7 @@ class Ftdi:
         return self.CHIP_TYPE_LUT.get(bcd)
 
     @classmethod
-    async def from_device(cls, device_handle):
+    async def from_device(cls, device_handle: Device):
         """
         Factory method: create and initialize FTDI wrapper.
 
@@ -97,26 +98,29 @@ class FtdiChannel:
     (FT2232, FT4232) have multiple independent channels.
     """
 
-    def __init__(self, ftdi, interface_no, mode=Bitmode.Reset):
+    def __init__(self,
+                 ftdi: Ftdi,
+                 channel: Channel,
+                 mode: Bitmode=Bitmode.Reset):
         """
         Create FTDI channel handle.
 
         :param ftdi: Ftdi instance
-        :param interface_no: Interface number (0=A, 1=B, 2=C, 3=D)
+        :param channel: Channel
         :param mode: Bitmode to set after initialization
         """
         self.ftdi = ftdi
         self.device = ftdi.device
-        self.interface_no = interface_no
+        self.interface_no = int(channel) + 1
         self.mode = mode
 
         # Claim interface
-        self.interface = self.device.interface_claim(interface_no)
+        self.interface = self.device.interface_claim(self.interface_no)
 
         # Get bulk endpoints
         # FTDI endpoint addresses: Interface A: 0x81/0x02, Interface B: 0x83/0x04, etc.
-        in_addr = 0x81 + (interface_no * 2)
-        out_addr = 0x02 + (interface_no * 2)
+        in_addr = 0x81 + (self.interface_no * 2)
+        out_addr = 0x02 + (self.interface_no * 2)
 
         in_ep_desc = self.interface.descriptor.endpoint_by_address(in_addr)
         out_ep_desc = self.interface.descriptor.endpoint_by_address(out_addr)
@@ -144,7 +148,7 @@ class FtdiChannel:
         if self.mode != Bitmode.Reset:
             await self.bitmode_set(self.mode)
 
-    async def bitmode_set(self, mode, gpio_oe=0):
+    async def bitmode_set(self, mode: Bitmode, gpio_oe: int = 0):
         """
         Set bitmode and GPIO output enable.
 
@@ -157,7 +161,7 @@ class FtdiChannel:
             self.interface_no + 1,  # FTDI uses 1-based indexing for wIndex
             b'')
 
-    async def latency_timer_set(self, timer):
+    async def latency_timer_set(self, timer: int):
         """
         Set latency timer (1-255 ms).
 
@@ -189,17 +193,29 @@ class FtdiChannel:
         """
         await self.ep_out.write(data)
 
-    async def read(self, size: int) -> tuple[bytes, Status]:
+    async def read_mps_with_status(self) -> tuple[bytes, Status]:
         """
         Raw read from IN endpoint with status extraction.
 
         FTDI prepends 2-byte modem status to every IN packet.
         This method strips the status and returns it separately.
 
-        :param size: Number of data bytes to read (excluding 2-byte status header)
         :returns: (data, status) tuple
         """
-        packet = await self.ep_in.read(size + 2)
+        packet = await self.ep_in.read()
         status = Status(int.from_bytes(packet[:2], "little"))
         self.status = status
         return packet[2:], status
+
+    async def read(self, size: int) -> bytes:
+        """
+        Raw read from IN endpoint with status excluded.
+
+        :param size: Number of data bytes to read (excluding 2-byte status header)
+        :returns: (data, status) tuple
+        """
+        buffer = b""
+        while len(buffer) < size:
+            chunk, status = await self.read_mps_with_status()
+            buffer += chunk
+        return buffer

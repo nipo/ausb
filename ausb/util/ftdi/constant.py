@@ -45,7 +45,7 @@ class Bitmode(enum.IntEnum):
     Ft1284 = 128
 
 
-class Interface(enum.IntEnum):
+class Channel(enum.IntEnum):
     """FTDI interface identifiers (for multi-channel chips)"""
     A = 0
     B = 1

@@ -1,7 +1,7 @@
 """FTDI EEPROM read/write with checksum validation"""
 
 from .constant import ChipType
-
+from .device import Ftdi
 
 class Eeprom:
     """
@@ -14,7 +14,7 @@ class Eeprom:
     - Chip-specific checksum algorithms
     """
 
-    def __init__(self, ftdi):
+    def __init__(self, ftdi: Ftdi):
         """
         Create EEPROM accessor.
 

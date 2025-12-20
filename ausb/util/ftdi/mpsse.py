@@ -1,9 +1,10 @@
 """FTDI MPSSE async operation engine"""
 
 import asyncio
+from typing import Tuple
 from collections import deque
 from .constant import MpsseCmd, MpsseIo, ChipType
-
+from .device import Ftdi, Channel
 
 # ============================================================================
 # Base Operation Class
@@ -18,7 +19,7 @@ class MpsseOperation(asyncio.Future):
     - gather(): Parse response bytes and resolve the future
     """
 
-    def lower(self):
+    def lower(self) -> bytes:
         """
         Serialize operation to MPSSE command bytes.
 
@@ -26,7 +27,7 @@ class MpsseOperation(asyncio.Future):
         """
         raise NotImplementedError
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         """
         Parse response bytes and resolve future.
 
@@ -44,50 +45,50 @@ class MpsseOperation(asyncio.Future):
 class SetBitsLow(MpsseOperation):
     """Set low byte GPIO (pins 0-7)"""
 
-    def __init__(self, value, oe):
+    def __init__(self, value: int, oe: int):
         super().__init__()
         self.value = value & 0xff
         self.oe = oe & 0xff
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.SetBitsLow, self.value, self.oe]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
 class SetBitsHigh(MpsseOperation):
     """Set high byte GPIO (pins 8-15)"""
 
-    def __init__(self, value, oe):
+    def __init__(self, value: int, oe: int):
         super().__init__()
         self.value = value & 0xff
         self.oe = oe & 0xff
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.SetBitsHigh, self.value, self.oe]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
 class GetBitsLow(MpsseOperation):
     """Get low byte GPIO (pins 0-7)"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.GetBitsLow]), 1
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(response[0])
 
 
 class GetBitsHigh(MpsseOperation):
     """Get high byte GPIO (pins 8-15)"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.GetBitsHigh]), 1
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(response[0])
 
 
@@ -98,34 +99,34 @@ class GetBitsHigh(MpsseOperation):
 class ClkDiv(MpsseOperation):
     """Set clock divisor"""
 
-    def __init__(self, divisor):
+    def __init__(self, divisor: int):
         super().__init__()
         self.divisor = divisor & 0xffff
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.ClkDiv]) + self.divisor.to_bytes(2, 'little'), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
 class ClkDiv5Enable(MpsseOperation):
     """Enable divide-by-5 clock prescaler (FT2232H/FT4232H/FT232H only)"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.ClkDiv5Enable]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
 class ClkDiv5Disable(MpsseOperation):
     """Disable divide-by-5 clock prescaler"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.ClkDiv5Disable]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
@@ -136,20 +137,20 @@ class ClkDiv5Disable(MpsseOperation):
 class LoopbackEnable(MpsseOperation):
     """Enable loopback mode (TDO connected to TDI internally)"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.LoopbackEnable]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
 class LoopbackDisable(MpsseOperation):
     """Disable loopback mode"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.LoopbackDisable]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
@@ -160,20 +161,20 @@ class LoopbackDisable(MpsseOperation):
 class ThreePhaseEnable(MpsseOperation):
     """Enable three-phase clocking (for I2C)"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.ThreePhaseEnable]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
 class ThreePhaseDisable(MpsseOperation):
     """Disable three-phase clocking"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.ThreePhaseDisable]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
@@ -184,20 +185,20 @@ class ThreePhaseDisable(MpsseOperation):
 class AdaptiveEnable(MpsseOperation):
     """Enable adaptive clocking (wait for clock stretching)"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.AdaptiveEnable]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
 class AdaptiveDisable(MpsseOperation):
     """Disable adaptive clocking"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.AdaptiveDisable]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
@@ -208,20 +209,20 @@ class AdaptiveDisable(MpsseOperation):
 class WaitOnHigh(MpsseOperation):
     """Wait until I/O goes high"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.WaitOnHigh]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
 class WaitOnLow(MpsseOperation):
     """Wait until I/O goes low"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.WaitOnLow]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
@@ -232,15 +233,15 @@ class WaitOnLow(MpsseOperation):
 class DriveOpenCollector(MpsseOperation):
     """Configure open-collector drive mode (FT232H only)"""
 
-    def __init__(self, low_pins, high_pins):
+    def __init__(self, low_pins: int, high_pins: int):
         super().__init__()
         self.low = low_pins & 0xff
         self.high = high_pins & 0xff
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.DriveOpenCollector, self.low, self.high]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
@@ -251,10 +252,10 @@ class DriveOpenCollector(MpsseOperation):
 class SendImmediate(MpsseOperation):
     """Force FTDI to flush internal buffer immediately"""
 
-    def lower(self):
+    def lower(self) -> bytes:
         return bytes([MpsseCmd.SendImmediate]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
@@ -271,13 +272,16 @@ class ShiftOut(MpsseOperation):
     - (value, bit_count): Bit mode (1-7 bits)
     """
 
-    def __init__(self, data, write_neg=True, lsb_first=True):
+    def __init__(self,
+                 data: bytes,
+                 write_neg: bool = True,
+                 lsb_first: bool = True):
         super().__init__()
         self.data = data
         self.write_neg = write_neg
         self.lsb_first = lsb_first
 
-    def lower(self):
+    def lower(self) -> bytes:
         cmd = MpsseIo.Write
         if self.write_neg:
             cmd |= MpsseIo.WriteNeg
@@ -300,7 +304,7 @@ class ShiftOut(MpsseOperation):
             cmd |= MpsseIo.Bits
             return bytes([cmd, bit_count - 1, value & 0x7f]), 0
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         self.set_result(None)
 
 
@@ -313,13 +317,16 @@ class ShiftIn(MpsseOperation):
     - (bit_count,): Bit mode (1-7 bits)
     """
 
-    def __init__(self, length, read_neg=False, lsb_first=True):
+    def __init__(self,
+                 length: int,
+                 read_neg: bool = False,
+                 lsb_first: bool = True):
         super().__init__()
         self.length = length
         self.read_neg = read_neg
         self.lsb_first = lsb_first
 
-    def lower(self):
+    def lower(self) -> bytes:
         cmd = MpsseIo.Read
         if self.read_neg:
             cmd |= MpsseIo.ReadNeg
@@ -343,10 +350,10 @@ class ShiftIn(MpsseOperation):
             cmd |= MpsseIo.Bits
             return bytes([cmd, bit_count - 1]), 1
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         if isinstance(self.length, int):
             # Byte mode - return bytes
-            self.set_result(response)
+            self.set_result(response: bytes)
         else:
             # Bit mode - return (value, bit_count)
             bit_count = self.length[0]
@@ -363,14 +370,18 @@ class ShiftInOut(MpsseOperation):
     - (value, bit_count): Bit mode (1-7 bits)
     """
 
-    def __init__(self, data, write_neg=True, read_neg=False, lsb_first=True):
+    def __init__(self,
+                 data: bytes,
+                 write_neg: bool = True,
+                 read_neg: bool = False,
+                 lsb_first: bool = True):
         super().__init__()
         self.data = data
         self.write_neg = write_neg
         self.read_neg = read_neg
         self.lsb_first = lsb_first
 
-    def lower(self):
+    def lower(self) -> bytes:
         cmd = MpsseIo.Write | MpsseIo.Read
         if self.write_neg:
             cmd |= MpsseIo.WriteNeg
@@ -397,10 +408,10 @@ class ShiftInOut(MpsseOperation):
             cmd |= MpsseIo.Bits
             return bytes([cmd, bit_count - 1, value & 0x7f]), 1
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         if isinstance(self.data, bytes):
             # Byte mode - return bytes
-            self.set_result(response)
+            self.set_result(response: bytes)
         else:
             # Bit mode - return (value, bit_count)
             bit_count = self.data[1]
@@ -415,7 +426,12 @@ class TmsShift(MpsseOperation):
     Used for JTAG TAP state machine transitions.
     """
 
-    def __init__(self, tms_bits, tdi=0, read_tdo=False, write_neg=True, lsb_first=True):
+    def __init__(self,
+                 tms_bits: Tuple[int, int],
+                 tdi: int = 0,
+                 read_tdo: bool = False,
+                 write_neg: bool = True,
+                 lsb_first: bool = True):
         super().__init__()
         self.tms_value, self.bit_count = tms_bits
         assert 1 <= self.bit_count <= 7, "TMS bit count must be 1-7"
@@ -424,7 +440,7 @@ class TmsShift(MpsseOperation):
         self.write_neg = write_neg
         self.lsb_first = lsb_first
 
-    def lower(self):
+    def lower(self) -> bytes:
         cmd = MpsseIo.Tms | MpsseIo.Bits
         if self.write_neg:
             cmd |= MpsseIo.WriteNeg
@@ -438,7 +454,7 @@ class TmsShift(MpsseOperation):
 
         return bytes([cmd, self.bit_count - 1, data_byte]), response_size
 
-    def gather(self, response):
+    def gather(self, response: bytes):
         if self.read_tdo:
             value = response[0] >> (8 - self.bit_count)
             self.set_result((value, self.bit_count))
@@ -463,7 +479,10 @@ class Mpsse:
         result = await op1               # Flushes both ops
     """
 
-    def __init__(self, channel, gpio_oe=0, gpio_value=0):
+    def __init__(self,
+                 channel: FtdiChannel,
+                 gpio_oe: int = 0,
+                 gpio_value : int =0):
         """
         Create MPSSE engine.
 
@@ -474,7 +493,7 @@ class Mpsse:
         self.channel = channel
         self._pending = deque()
         self._flush_lock = asyncio.Lock()
-        self._worker_scheduled = False
+        self._next_worker = None
 
         # GPIO state tracking
         self._gpio_oe = gpio_oe
@@ -488,7 +507,7 @@ class Mpsse:
                          else 60e6)
         self._divisor = (False, 0)  # (div5_enable, divisor)
 
-    def _queue(self, op):
+    def _queue(self, op: MpsseOperation) -> asyncio.Future:
         """
         Queue operation and schedule worker.
 
@@ -501,9 +520,8 @@ class Mpsse:
 
     def _schedule_worker(self):
         """Schedule worker coroutine if not already scheduled"""
-        if not self._worker_scheduled and self._pending:
-            self._worker_scheduled = True
-            asyncio.create_task(self._flush_worker())
+        if not self._worker and self._pending:
+            self._next_worker = asyncio.create_task(self._flush_worker())
 
     async def _flush_worker(self):
         """
@@ -513,7 +531,7 @@ class Mpsse:
         distributes responses, and resolves futures.
         """
         async with self._flush_lock:
-            self._worker_scheduled = False
+            self._next_worker = None
 
             if not self._pending:
                 return
@@ -539,7 +557,7 @@ class Mpsse:
 
                 total_response = sum(response_sizes)
                 if total_response > 0:
-                    response_blob, _ = await self.channel.read(total_response)
+                    response_blob = await self.channel.read(total_response: bytes)
                 else:
                     response_blob = b''
 
@@ -565,7 +583,7 @@ class Mpsse:
     # Public API - GPIO
     # ========================================================================
 
-    def gpio_set_low(self, value, oe):
+    def gpio_set_low(self, value: int, oe: int) -> asyncio.Future:
         """
         Set low byte GPIO (pins 0-7).
 
@@ -577,7 +595,7 @@ class Mpsse:
         self._gpio_oe = (self._gpio_oe & 0xff00) | (oe & 0xff)
         return self._queue(SetBitsLow(value, oe))
 
-    def gpio_set_high(self, value, oe):
+    def gpio_set_high(self, value: int, oe: int) -> asyncio.Future:
         """
         Set high byte GPIO (pins 8-15).
 
@@ -589,7 +607,7 @@ class Mpsse:
         self._gpio_oe = (self._gpio_oe & 0x00ff) | ((oe & 0xff) << 8)
         return self._queue(SetBitsHigh(value, oe))
 
-    def gpio_get_low(self):
+    def gpio_get_low(self) -> asyncio.Future:
         """
         Get low byte GPIO (pins 0-7).
 
@@ -597,7 +615,7 @@ class Mpsse:
         """
         return self._queue(GetBitsLow())
 
-    def gpio_get_high(self):
+    def gpio_get_high(self) -> asyncio.Future:
         """
         Get high byte GPIO (pins 8-15).
 
@@ -605,7 +623,7 @@ class Mpsse:
         """
         return self._queue(GetBitsHigh())
 
-    def gpio_set(self, pin, value):
+    def gpio_set(self, pin: int, value: int) -> asyncio.Future:
         """
         Set single GPIO pin.
 
@@ -618,7 +636,7 @@ class Mpsse:
         new_value = (self._gpio_value & ~mask) | (mask if value else 0)
         return self.gpio_mask_set(mask, new_oe, new_value)
 
-    def gpio_mask_set(self, change_mask, oe, value):
+    def gpio_mask_set(self, change_mask: int, oe: int, value: int) -> asyncio.Future:
         """
         Set multiple GPIO pins by mask.
 
@@ -638,7 +656,7 @@ class Mpsse:
 
         return asyncio.gather(*ops) if len(ops) > 1 else ops[0]
 
-    def gpio_get(self, pin):
+    def gpio_get(self, pin: int) -> asyncio.Future:
         """
         Get single GPIO pin value.
 
@@ -657,8 +675,7 @@ class Mpsse:
     # Public API - Clock
     # ========================================================================
 
-    @property
-    def freq(self):
+    def freq_get(self) -> int:
         """
         Current MPSSE clock frequency.
 
@@ -670,8 +687,7 @@ class Mpsse:
             r /= 5
         return r
 
-    @freq.setter
-    def freq(self, freq):
+    def freq_set(self, freq: int) -> asyncio.Future:
         """
         Set MPSSE clock frequency.
 
@@ -692,17 +708,17 @@ class Mpsse:
 
         if self.can_div5:
             self._queue(ClkDiv5Enable() if div5 else ClkDiv5Disable())
-        self._queue(ClkDiv(div))
+        return self._queue(ClkDiv(div))
 
     # ========================================================================
     # Public API - Loopback
     # ========================================================================
 
-    def loopback_enable(self):
+    def loopback_enable(self) -> asyncio.Future:
         """Enable loopback mode (TDO->TDI internally)"""
         return self._queue(LoopbackEnable())
 
-    def loopback_disable(self):
+    def loopback_disable(self) -> asyncio.Future:
         """Disable loopback mode"""
         return self._queue(LoopbackDisable())
 
@@ -710,19 +726,19 @@ class Mpsse:
     # Public API - Three-Phase / Adaptive
     # ========================================================================
 
-    def three_phase_enable(self):
+    def three_phase_enable(self) -> asyncio.Future:
         """Enable three-phase clocking (for I2C)"""
         return self._queue(ThreePhaseEnable())
 
-    def three_phase_disable(self):
+    def three_phase_disable(self) -> asyncio.Future:
         """Disable three-phase clocking"""
         return self._queue(ThreePhaseDisable())
 
-    def adaptive_enable(self):
+    def adaptive_enable(self) -> asyncio.Future:
         """Enable adaptive clocking (clock stretching)"""
         return self._queue(AdaptiveEnable())
 
-    def adaptive_disable(self):
+    def adaptive_disable(self) -> asyncio.Future:
         """Disable adaptive clocking"""
         return self._queue(AdaptiveDisable())
 
@@ -730,11 +746,11 @@ class Mpsse:
     # Public API - Wait
     # ========================================================================
 
-    def wait_on_high(self):
+    def wait_on_high(self) -> asyncio.Future:
         """Wait until I/O signal goes high"""
         return self._queue(WaitOnHigh())
 
-    def wait_on_low(self):
+    def wait_on_low(self) -> asyncio.Future:
         """Wait until I/O signal goes low"""
         return self._queue(WaitOnLow())
 
@@ -742,7 +758,7 @@ class Mpsse:
     # Public API - Drive Mode
     # ========================================================================
 
-    def drive_open_collector(self, low_pins, high_pins):
+    def drive_open_collector(self, low_pins, high_pins) -> asyncio.Future:
         """
         Configure open-collector drive mode (FT232H only).
 
@@ -755,7 +771,7 @@ class Mpsse:
     # Public API - Data Shift
     # ========================================================================
 
-    def shift_out(self, data, write_neg=True, lsb_first=True):
+    def shift_out(self, data, write_neg=True, lsb_first=True) -> asyncio.Future:
         """
         Shift data out (write-only).
 
@@ -766,7 +782,7 @@ class Mpsse:
         """
         return self._queue(ShiftOut(data, write_neg, lsb_first))
 
-    def shift_in(self, length, read_neg=False, lsb_first=True):
+    def shift_in(self, length, read_neg=False, lsb_first=True) -> asyncio.Future:
         """
         Shift data in (read-only).
 
@@ -777,7 +793,7 @@ class Mpsse:
         """
         return self._queue(ShiftIn(length, read_neg, lsb_first))
 
-    def shift_in_out(self, data, write_neg=True, read_neg=False, lsb_first=True):
+    def shift_in_out(self, data, write_neg=True, read_neg=False, lsb_first=True) -> asyncio.Future:
         """
         Shift data in and out simultaneously.
 
@@ -789,7 +805,7 @@ class Mpsse:
         """
         return self._queue(ShiftInOut(data, write_neg, read_neg, lsb_first))
 
-    def tms_shift(self, tms_bits, tdi=0, read_tdo=False, write_neg=True, lsb_first=True):
+    def tms_shift(self, tms_bits, tdi=0, read_tdo=False, write_neg=True, lsb_first=True) -> asyncio.Future:
         """
         TMS shift operation (JTAG TAP state transitions).
 
@@ -802,6 +818,6 @@ class Mpsse:
         """
         return self._queue(TmsShift(tms_bits, tdi, read_tdo, write_neg, lsb_first))
 
-    def send_immediate(self):
+    def send_immediate(self) -> asyncio.Future:
         """Force FTDI to flush its internal buffer"""
         return self._queue(SendImmediate())

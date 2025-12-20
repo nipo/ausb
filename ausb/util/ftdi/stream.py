@@ -5,7 +5,6 @@ from ausb.stream import EndpointStreamReader
 from ausb import exception
 from .constant import Status
 
-
 class FtdiStreamReader(EndpointStreamReader):
     """
     StreamReader for FTDI endpoints that handles 2-byte status headers.
