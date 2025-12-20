@@ -27,4 +27,4 @@ AUsb provides a pythonic interface to USB devices::
 
 from .exception import *
 from .context import *
-from .handle import EndpointStreamReader, EndpointStreamWriter
+from .stream import EndpointStreamReader, EndpointStreamWriter

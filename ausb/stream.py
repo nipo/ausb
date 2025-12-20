@@ -264,8 +264,7 @@ class EndpointStreamWriter:
         """
         if self._closed:
             raise RuntimeError("Stream is closed")
-        async with self._buffer_lock:
-            self._buffer.extend(data)
+        self._buffer.extend(data)
         self._drain_start()
 
     def writelines(self, lines):
@@ -275,8 +274,7 @@ class EndpointStreamWriter:
         :param lines: Iterable of bytes to write
         """
         for line in lines:
-            async with self._buffer_lock:
-                self.write(line)
+            self._buffer.extend(line)
         self._drain_start()
 
     def _drain_start(self):
