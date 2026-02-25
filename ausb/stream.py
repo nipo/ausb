@@ -88,6 +88,9 @@ class EndpointStreamReader:
         except asyncio.CancelledError:
             # Task was cancelled (normal cleanup)
             pass
+        finally:
+            self._eof = True
+            self._data_available.set()
 
     async def read(self, n=-1):
         """
@@ -138,7 +141,7 @@ class EndpointStreamReader:
         remaining = n
 
         while remaining > 0:
-            chunk = self.read(remaining)
+            chunk = await self.read(remaining)
             if not chunk:
                 break
 

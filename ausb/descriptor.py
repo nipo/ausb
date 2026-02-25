@@ -161,10 +161,7 @@ class Device:
         Open device, get a Device handle on it.
         """
         from . import handle
-        try:
-            h = self.device.open()
-        except:
-            return None
+        h = self.device.open()
         return handle.Device(self.context, self, h)
     
 class Configuration:

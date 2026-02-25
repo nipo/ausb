@@ -1,18 +1,20 @@
 import asyncio
 import usb1
-from collections import deque
-from . import exception
+from .exception import map_usb_error
 from .constant import *
+
+DEFAULT_TIMEOUT = 1000
 
 class Device:
     """
     Opened device handle. This object should be spawned by DeviceDescriptor.open().
     """
 
-    def __init__(self, context, descriptor, handle):
+    def __init__(self, context, descriptor, handle, timeout=DEFAULT_TIMEOUT):
         self.context = context
         self.descriptor = descriptor
         self.handle = handle
+        self._timeout = timeout
 
     def reopen(self):
         ports = self.descriptor.ports
@@ -82,60 +84,21 @@ class Device:
     def languages(self):
         return self.handle.getSupportedLanguageList()
 
-    @staticmethod
-    def _on_transfer_done(transfer):
-        """
-        Internal method for handling transfers with Asyncio.
-        """
-        transfer_done = transfer.transfer_done
-
-        if not transfer_done or transfer_done.done():
-            return
-
-        transfer.transfer_done = None
-        
-        status = transfer.getStatus()
-        if status == usb1.TRANSFER_COMPLETED:
-            transfer_done.set_result(transfer.getBuffer()[:transfer.getActualLength()])
-        elif status == usb1.TRANSFER_CANCELLED:
-            transfer_done.set_exception(asyncio.CancelledError())
-        elif status == usb1.TRANSFER_ERROR:
-            transfer_done.set_exception(exception.TransferError())
-        elif status == usb1.TRANSFER_TIMED_OUT:
-            transfer_done.set_exception(exception.TransferTimeout())
-        elif status == usb1.TRANSFER_STALL:
-            transfer_done.set_exception(exception.TransferStalled())
-        elif status == usb1.TRANSFER_NO_DEVICE:
-            transfer_done.set_exception(exception.DeviceError())
-        elif status == usb1.TRANSFER_OVERFLOW:
-            transfer_done.set_exception(exception.TransferOverflow())
+    def _sync_control(self, bmRequestType, request, value, index, data_or_length, timeout):
+        if isinstance(data_or_length, int):
+            return map_usb_error(
+                self.handle.controlRead,
+                bmRequestType, request, value, index, data_or_length,
+                timeout=timeout)
         else:
-            transfer_done.set_exception(RuntimeError())
-    
-    async def _transfer_run(self, transfer):
-        """
-        Internal method for handling transfers with Asyncio.
-        """
-        transfer_done = asyncio.get_event_loop().create_future()
-        transfer.transfer_done = transfer_done
-        transfer.setCallback(self._on_transfer_done)
-        try:
-            transfer.submit()
-        except usb1.USBErrorNoDevice:
-            raise DeviceError()
+            return map_usb_error(
+                self.handle.controlWrite,
+                bmRequestType, request, value, index, data_or_length,
+                timeout=timeout)
 
-        try:
-            return await transfer_done
-        except asyncio.CancelledError:
-            try:
-                transfer.cancel()
-            except:
-                pass
-            raise
-
-    async def control(self, type, recipient, request, value, index, data_or_length):
+    async def control(self, type, recipient, request, value, index, data_or_length, timeout=None):
         """
-        Raw control IN/OUT request targetted on device.
+        Raw control IN/OUT request targeted on device.
         """
         bmRequestType = RequestType.pack(RequestTypeDirection.DeviceToHost
                                 if isinstance(data_or_length, int) else
@@ -143,13 +106,15 @@ class Device:
                                 type,
                                 recipient)
 
-        transfer = self.handle.getTransfer()
-        transfer.setControl(bmRequestType, request, value, index, data_or_length)
-        return await self._transfer_run(transfer)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self._sync_control,
+            bmRequestType, request, value, index, data_or_length,
+            timeout or self._timeout)
 
     async def standard_control(self, request, value, index, data_or_length):
         """
-        Standard control IN/OUT request targetted on device.
+        Standard control IN/OUT request targeted on device.
         """
         return await self.control(RequestTypeType.Standard,
                                   RequestTypeRecipient.Device,
@@ -157,7 +122,7 @@ class Device:
 
     async def class_control(self, request, value, index, data_or_length):
         """
-        Standard control IN/OUT request targetted on device.
+        Class control IN/OUT request targeted on device.
         """
         return await self.control(RequestTypeType.Class,
                                   RequestTypeRecipient.Device,
@@ -165,7 +130,7 @@ class Device:
 
     async def vendor_control(self, request, value, index, data_or_length):
         """
-        Vendor-specific control IN/OUT request targetted on device.
+        Vendor-specific control IN/OUT request targeted on device.
         """
         return await self.control(RequestTypeType.Vendor,
                                   RequestTypeRecipient.Device,
@@ -178,7 +143,7 @@ class Device:
     async def set_feature(self, feature_selector):
         return await self.standard_control(Request.SetFeature, feature_selector,
                                            0, b'')
-    
+
 class Interface:
     """
     Interface handle. Should be spawned by Device.interface_claim().
@@ -206,42 +171,42 @@ class Interface:
 
     @alternate.setter
     def alternate(self, setting):
-        self.device.setInterfaceAltSetting(self.interface, setting)
+        self.device.handle.setInterfaceAltSetting(self.interface, setting)
         self.__alt_setting = setting
 
     def kernel_driver_detach(self):
         """
         Ask for kernel driver detach
         """
-        self.device.detachKernelDriver(self.interface)
+        self.device.handle.detachKernelDriver(self.interface)
 
     def kernel_driver_attach(self):
         """
         Ask for kernel driver attach
         """
-        self.device.attachKernelDriver(self.interface)
+        self.device.handle.attachKernelDriver(self.interface)
 
     async def standard_control(self, request, value, data_or_length):
         """
-        Standard control IN/OUT request targetted on interface.
+        Standard control IN/OUT request targeted on interface.
         """
-        return await self.control(RequestTypeType.Standard,
+        return await self.device.control(RequestTypeType.Standard,
                                   RequestTypeRecipient.Interface,
                                   request, value, self.interface, data_or_length)
 
     async def class_control(self, request, value, data_or_length):
         """
-        Standard control IN/OUT request targetted on interface.
+        Class control IN/OUT request targeted on interface.
         """
-        return await self.control(RequestTypeType.Class,
+        return await self.device.control(RequestTypeType.Class,
                                   RequestTypeRecipient.Interface,
                                   request, value, self.interface, data_or_length)
 
     async def vendor_control(self, request, value, data_or_length):
         """
-        Vendor-specific control IN/OUT request targetted on interface.
+        Vendor-specific control IN/OUT request targeted on interface.
         """
-        return await self.control(RequestTypeType.Vendor,
+        return await self.device.control(RequestTypeType.Vendor,
                                   RequestTypeRecipient.Interface,
                                   request, value, self.interface, data_or_length)
 
@@ -250,7 +215,7 @@ class Interface:
                                            b'')
 
     async def set_feature(self, feature_selector):
-        return await self.standard_control(Request.ClearFeature, feature_selector,
+        return await self.standard_control(Request.SetFeature, feature_selector,
                                            b'')
 
     def open(self, endpoint):
@@ -281,10 +246,11 @@ class Endpoint:
     """
     Endpoint handle, should be spawned by Interface.open()
     """
-    def __init__(self, device, address, mps):
+    def __init__(self, device, address, mps, timeout=DEFAULT_TIMEOUT):
         self.device = device
         self.address = address
         self.mps = mps
+        self._timeout = timeout
 
     def resume(self):
         """
@@ -294,7 +260,7 @@ class Endpoint:
 
     async def standard_control(self, request, value, data_or_length):
         """
-        Standard control IN/OUT request targetted on endpoint.
+        Standard control IN/OUT request targeted on endpoint.
         """
         return await self.device.control(RequestTypeType.Standard,
                                   RequestTypeRecipient.Endpoint,
@@ -302,7 +268,7 @@ class Endpoint:
 
     async def class_control(self, request, value, data_or_length):
         """
-        Standard control IN/OUT request targetted on endpoint.
+        Class control IN/OUT request targeted on endpoint.
         """
         return await self.device.control(RequestTypeType.Class,
                                   RequestTypeRecipient.Endpoint,
@@ -310,7 +276,7 @@ class Endpoint:
 
     async def vendor_control(self, request, value, data_or_length):
         """
-        Vendor-specific control IN/OUT request targetted on endpoint.
+        Vendor-specific control IN/OUT request targeted on endpoint.
         """
         return await self.device.control(RequestTypeType.Vendor,
                                   RequestTypeRecipient.Endpoint,
@@ -321,78 +287,120 @@ class Endpoint:
                                            b'')
 
     async def set_feature(self, feature_selector):
-        return await self.standard_control(Request.ClearFeature, feature_selector,
+        return await self.standard_control(Request.SetFeature, feature_selector,
                                            b'')
-        
+
 class BulkEndpoint(Endpoint):
     pass
 
 class BulkInEndpoint(BulkEndpoint):
-    async def read(self, size = 0):
+    def read_sync(self, size=0, timeout=None):
+        """Sync bulk read. For use inside run_in_executor."""
+        return map_usb_error(
+            self.device.handle.bulkRead,
+            self.address, size or self.mps,
+            timeout=timeout or self._timeout)
+
+    async def read(self, size=0, timeout=None):
         """
         Bulk IN transfer
         """
-        size = size or self.mps
-
-        transfer = self.device.handle.getTransfer()
-        transfer.setBulk(self.address, size)
-        return await self.device._transfer_run(transfer)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.read_sync, size, timeout)
 
     def stream_reader(self, buffer_limit=65536):
         """
         Create a StreamReader wrapper for this endpoint.
 
         :param buffer_limit: Maximum internal buffer size before pausing reads (default 64KB)
-        :returns: BulkStreamReader instance
+        :returns: EndpointStreamReader instance
         """
-        from .stream import BulkStreamWriter
-        return BulkStreamReader(self, buffer_limit=buffer_limit)
+        from .stream import EndpointStreamReader
+        return EndpointStreamReader(self, buffer_limit=buffer_limit)
 
 class BulkOutEndpoint(BulkEndpoint):
-    async def write(self, data):
+    def write_sync(self, data, timeout=None):
+        """Sync bulk write. For use inside run_in_executor."""
+        return map_usb_error(
+            self.device.handle.bulkWrite,
+            self.address, data,
+            timeout=timeout or self._timeout)
+
+    async def write(self, data, timeout=None):
         """
         Bulk OUT transfer
         """
-        transfer = self.device.handle.getTransfer()
-        transfer.setBulk(self.address, data)
-        return await self.device._transfer_run(transfer)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.write_sync, data, timeout)
 
     def stream_writer(self):
         """
         Create a StreamWriter wrapper for this endpoint.
 
-        :returns: BulkStreamWriter instance
+        :returns: EndpointStreamWriter instance
         """
-        from .stream import BulkStreamWriter
-        return BulkStreamWriter(self)
+        from .stream import EndpointStreamWriter
+        return EndpointStreamWriter(self)
 
 class InterruptEndpoint(Endpoint):
-    def __init__(self, device, address, mps, interval):
-        Endpoint.__init__(self, device, address, mps)
+    def __init__(self, device, address, mps, interval, timeout=DEFAULT_TIMEOUT):
+        Endpoint.__init__(self, device, address, mps, timeout)
         self.interval = interval
 
 class InterruptInEndpoint(InterruptEndpoint):
-    async def read(self, size = 0):
+    def read_sync(self, size=0, timeout=None):
+        """Sync interrupt read. For use inside run_in_executor."""
+        size = size or self.mps
+        if size > self.mps:
+            raise ValueError("Size too big for max packet size")
+        return map_usb_error(
+            self.device.handle.interruptRead,
+            self.address, size,
+            timeout=timeout or self._timeout)
+
+    async def read(self, size=0, timeout=None):
         """
         Interrupt IN transfer
         """
-        size = size or self.mps
-
-        if size > self.mps:
-            raise ValueError("Size too big for max packet size")
-
-        transfer = self.device.handle.getTransfer()
-        transfer.setInterrupt(self.address, size)
-        return await self.device._transfer_run(transfer)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.read_sync, size, timeout)
 
 class InterruptOutEndpoint(InterruptEndpoint):
-    async def write(self, data):
+    def write_sync(self, data, timeout=None):
+        """Sync interrupt write. For use inside run_in_executor."""
+        if len(data) > self.mps:
+            raise ValueError("Data buffer too big for max packet size")
+        return map_usb_error(
+            self.device.handle.interruptWrite,
+            self.address, data,
+            timeout=timeout or self._timeout)
+
+    async def write(self, data, timeout=None):
         """
         Interrupt OUT transfer
         """
-        if len(data) > self.mps:
-            raise ValueError("Data buffer too big for max packet size")
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.write_sync, data, timeout)
 
-        transfer = self.device.handle.getTransfer()
-        transfer.setInterrupt(self.address, data)
-        return await self.device._transfer_run(transfer)
+class BulkPair:
+    """Paired bulk OUT/IN endpoints for command/response protocols."""
+
+    def __init__(self, ep_out, ep_in):
+        self.out = ep_out
+        self.in_ = ep_in
+
+    def _sync_transfer(self, data, response_len, timeout):
+        self.out.write_sync(data, timeout)
+        if response_len == 0:
+            return b""
+        return self.in_.read_sync(response_len, timeout)
+
+    async def transfer(self, data, response_len, timeout=None):
+        """Write data, then read response_len bytes, atomically in one executor call."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self._sync_transfer, data, response_len, timeout)
