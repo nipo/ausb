@@ -13,7 +13,49 @@ from ausb.handle import (
 from ausb.exception import TransferTimeout, TransferStalled, DeviceError
 
 
-def make_mock_handle():
+def make_fake_transfer(reply: bytes = b"", actual_length: int | None = None,
+                       status: int = usb1.TRANSFER_COMPLETED):
+    """Create a stub libusb transfer that replays a canned reply
+    (for IN) or just records what it was given (for OUT). On
+    ``submit()`` it immediately invokes the registered callback
+    with itself so the awaiting Future resolves synchronously —
+    no event-thread bridging needed in unit tests."""
+    transfer = Mock()
+    transfer._captured_args = None
+    transfer._reply = reply
+    transfer._status = status
+
+    def _setBulk(address, buffer_or_size, callback=None, timeout=None):
+        transfer._captured_args = ("bulk", address, buffer_or_size,
+                                   callback, timeout)
+    def _setInterrupt(address, buffer_or_size, callback=None, timeout=None):
+        transfer._captured_args = ("interrupt", address, buffer_or_size,
+                                   callback, timeout)
+
+    def _submit():
+        kind, address, buffer_or_size, callback, timeout = transfer._captured_args
+        if isinstance(buffer_or_size, int):
+            transfer.getActualLength.return_value = (
+                actual_length if actual_length is not None else len(reply))
+            transfer.getBuffer.return_value = bytearray(
+                reply.ljust(buffer_or_size, b"\x00"))
+        else:
+            transfer.getActualLength.return_value = (
+                actual_length if actual_length is not None else len(buffer_or_size))
+            transfer.getBuffer.return_value = bytearray(buffer_or_size)
+        transfer.getStatus.return_value = transfer._status
+        callback(transfer)
+
+    transfer.setBulk = Mock(side_effect=_setBulk)
+    transfer.setInterrupt = Mock(side_effect=_setInterrupt)
+    transfer.submit = Mock(side_effect=_submit)
+    return transfer
+
+
+def make_mock_handle(*replies):
+    """Mock USB device handle. ``replies`` is a sequence of bytes
+    objects served (in order) to async transfer reads; sync
+    bulkRead / interruptRead fall back to a fixed legacy stub."""
     handle = Mock()
     handle.controlRead = Mock(return_value=b'\x00\x00')
     handle.controlWrite = Mock(return_value=0)
@@ -21,6 +63,16 @@ def make_mock_handle():
     handle.bulkWrite = Mock(return_value=2)
     handle.interruptRead = Mock(return_value=b'\xcc')
     handle.interruptWrite = Mock(return_value=1)
+
+    queue = list(replies)
+    handle._fake_transfers = []
+
+    def _getTransfer(*args, **kwargs):
+        reply = queue.pop(0) if queue else b""
+        t = make_fake_transfer(reply)
+        handle._fake_transfers.append(t)
+        return t
+    handle.getTransfer = Mock(side_effect=_getTransfer)
     return handle
 
 
@@ -63,26 +115,32 @@ async def test_device_control_timeout_mapping():
 
 
 async def test_bulk_in_read():
-    """BulkInEndpoint.read() uses run_in_executor."""
-    handle = make_mock_handle()
-    handle.bulkRead.return_value = b'\xde\xad'
+    """BulkInEndpoint.read() submits an async transfer and resolves
+    the awaiting Future from libusb's completion callback."""
+    handle = make_mock_handle(b'\xde\xad')
     dev = make_device(handle)
 
     ep = BulkInEndpoint(dev, 0x81, 512)
     result = await ep.read(64)
     assert result == b'\xde\xad'
-    handle.bulkRead.assert_called_once()
+    handle.getTransfer.assert_called_once()
+    transfer = handle._fake_transfers[0]
+    transfer.setBulk.assert_called_once()
+    transfer.submit.assert_called_once()
     print("  BulkInEndpoint.read() works")
 
 
 async def test_bulk_out_write():
-    """BulkOutEndpoint.write() uses run_in_executor."""
+    """BulkOutEndpoint.write() submits an async OUT transfer."""
     handle = make_mock_handle()
     dev = make_device(handle)
 
     ep = BulkOutEndpoint(dev, 0x02, 512)
-    await ep.write(b'\xca\xfe')
-    handle.bulkWrite.assert_called_once()
+    written = await ep.write(b'\xca\xfe')
+    assert written == 2
+    handle.getTransfer.assert_called_once()
+    transfer = handle._fake_transfers[0]
+    transfer.setBulk.assert_called_once()
     print("  BulkOutEndpoint.write() works")
 
 
@@ -143,9 +201,12 @@ def test_bulk_pair_sync_transfer_no_response():
 
 
 async def test_bulk_pair_transfer():
-    """BulkPair.transfer() is async via run_in_executor."""
-    handle = make_mock_handle()
-    handle.bulkRead.return_value = b'\xde\xad\xbe\xef'
+    """BulkPair.transfer() submits OUT and IN concurrently via
+    asyncio.gather; both run as async libusb transfers."""
+    # First getTransfer call serves the OUT (no reply), second serves
+    # the IN (canned reply). gather submits both; in the test stub
+    # both fire their callbacks immediately.
+    handle = make_mock_handle(b"", b'\xde\xad\xbe\xef')
     dev = make_device(handle)
 
     ep_out = BulkOutEndpoint(dev, 0x02, 512)
@@ -154,13 +215,13 @@ async def test_bulk_pair_transfer():
 
     result = await pair.transfer(b'\x01\x02', 4)
     assert result == b'\xde\xad\xbe\xef'
+    assert handle.getTransfer.call_count == 2
     print("  BulkPair.transfer() async works")
 
 
 async def test_interrupt_endpoints():
-    """InterruptIn/Out endpoints work."""
-    handle = make_mock_handle()
-    handle.interruptRead.return_value = b'\x55'
+    """InterruptIn/Out endpoints work via async libusb transfers."""
+    handle = make_mock_handle(b'\x55', b"")
     dev = make_device(handle)
 
     ep_in = InterruptInEndpoint(dev, 0x83, 64, interval=10)
@@ -168,9 +229,11 @@ async def test_interrupt_endpoints():
     assert result == b'\x55'
 
     ep_out = InterruptOutEndpoint(dev, 0x04, 64, interval=10)
-    await ep_out.write(b'\x66')
-    handle.interruptWrite.assert_called_once()
-
+    written = await ep_out.write(b'\x66')
+    assert written == 1
+    assert handle.getTransfer.call_count == 2
+    # Second transfer was the OUT.
+    assert handle._fake_transfers[1].setInterrupt.called
     print("  Interrupt endpoints work")
 
 

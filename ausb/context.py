@@ -101,11 +101,17 @@ class Context:
 
         # Hotplug support
         self._hotplug_iterators = set()
-        self._hotplug_thread = None
-        self._hotplug_stop = threading.Event()
+
+        # Event-handler thread. Drives libusb_handle_events_timeout for
+        # both hotplug callbacks (when registered) and asynchronous
+        # transfer completions. Always running — async transfers
+        # require it even when hotplug is disabled.
+        self._event_thread = None
+        self._event_stop = threading.Event()
 
         if enable_hotplug:
-            self._start_hotplug_thread()
+            self._register_hotplug()
+        self._start_event_thread()
 
     @property
     def context(self):
@@ -115,8 +121,9 @@ class Context:
     def ignore_access_errors(self):
         return self._ignore_access_errors
 
-    def _start_hotplug_thread(self):
-        """Start a daemon thread for processing hotplug events."""
+    def _register_hotplug(self):
+        """Register the hotplug callback. The libusb event loop that
+        delivers it is started separately by ``_start_event_thread``."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -147,18 +154,28 @@ class Context:
                 events=usb1.HOTPLUG_EVENT_DEVICE_ARRIVED | usb1.HOTPLUG_EVENT_DEVICE_LEFT
             )
         except (AttributeError, usb1.USBError):
-            # Hotplug not supported on this platform
-            return
+            # Hotplug not supported on this platform — that's OK,
+            # the event thread still runs for async transfers.
+            pass
 
-        def hotplug_worker():
-            while not self._hotplug_stop.is_set():
+    def _start_event_thread(self):
+        """Start the daemon thread that drives ``handleEventsTimeout``.
+
+        ``libusb_handle_events`` services hotplug callbacks AND async
+        transfer completions in one go, so a single thread covers
+        both. Required for the asynchronous transfer API; hotplug is
+        a side benefit when registered."""
+        def event_worker():
+            while not self._event_stop.is_set():
                 try:
                     self._ctx.handleEventsTimeout(0.5)
                 except Exception:
                     break
 
-        self._hotplug_thread = threading.Thread(target=hotplug_worker, daemon=True)
-        self._hotplug_thread.start()
+        self._event_thread = threading.Thread(target=event_worker,
+                                              name="ausb-events",
+                                              daemon=True)
+        self._event_thread.start()
 
     def hotplug_events(self):
         """
@@ -230,11 +247,11 @@ class Context:
         for iterator in list(self._hotplug_iterators):
             iterator.close()
 
-        # Stop hotplug thread
-        if self._hotplug_thread:
-            self._hotplug_stop.set()
-            self._hotplug_thread.join(timeout=2)
-            self._hotplug_thread = None
+        # Stop event-handler thread
+        if self._event_thread:
+            self._event_stop.set()
+            self._event_thread.join(timeout=2)
+            self._event_thread = None
 
         self._ctx.close()
 

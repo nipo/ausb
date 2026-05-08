@@ -1,9 +1,65 @@
 import asyncio
 import usb1
-from .exception import map_usb_error
+from .exception import (
+    map_usb_error,
+    TransferError, TransferTimeout, TransferStalled,
+    DeviceError, TransferOverflow,
+)
 from .constant import *
 
 DEFAULT_TIMEOUT = 1000
+
+
+# libusb transfer status -> ausb exception. None means "completed OK".
+_TRANSFER_STATUS_MAP = {
+    usb1.TRANSFER_COMPLETED: None,
+    usb1.TRANSFER_TIMED_OUT: TransferTimeout,
+    usb1.TRANSFER_STALL:     TransferStalled,
+    usb1.TRANSFER_NO_DEVICE: DeviceError,
+    usb1.TRANSFER_OVERFLOW:  TransferOverflow,
+    usb1.TRANSFER_CANCELLED: TransferError,
+    usb1.TRANSFER_ERROR:     TransferError,
+}
+
+
+def _resolve_transfer_future(loop, future, transfer, payload_extractor):
+    """libusb completion callback. Runs on the libusb event thread —
+    schedule the actual Future resolution onto the asyncio loop via
+    ``call_soon_threadsafe``. ``payload_extractor`` is called on the
+    asyncio side and returns the value to set on the future (e.g.
+    ``bytes(transfer.getBuffer()[:transfer.getActualLength()])`` for
+    reads, ``transfer.getActualLength()`` for writes)."""
+    status = transfer.getStatus()
+    if status == usb1.TRANSFER_COMPLETED:
+        try:
+            payload = payload_extractor(transfer)
+        except Exception as exc:
+            loop.call_soon_threadsafe(_safe_set_exception, future, exc)
+            return
+        loop.call_soon_threadsafe(_safe_set_result, future, payload)
+    else:
+        exc_cls = _TRANSFER_STATUS_MAP.get(status, TransferError)
+        loop.call_soon_threadsafe(
+            _safe_set_exception, future,
+            exc_cls(f"transfer status {status}"))
+
+
+def _safe_set_result(future, value):
+    if not future.done():
+        future.set_result(value)
+
+
+def _safe_set_exception(future, exc):
+    if not future.done():
+        future.set_exception(exc)
+
+
+def _read_payload(transfer):
+    return bytes(transfer.getBuffer()[:transfer.getActualLength()])
+
+
+def _write_payload(transfer):
+    return transfer.getActualLength()
 
 class Device:
     """
@@ -295,19 +351,36 @@ class BulkEndpoint(Endpoint):
 
 class BulkInEndpoint(BulkEndpoint):
     def read_sync(self, size=0, timeout=None):
-        """Sync bulk read. For use inside run_in_executor."""
+        """Sync bulk read. For use inside run_in_executor or
+        outside an asyncio loop. The async ``read()`` uses libusb's
+        async transfer API instead — multiple in-flight transfers
+        across endpoints stay genuinely concurrent."""
         return map_usb_error(
             self.device.handle.bulkRead,
             self.address, size or self.mps,
             timeout=timeout or self._timeout)
 
     async def read(self, size=0, timeout=None):
-        """
-        Bulk IN transfer
+        """Bulk IN transfer.
+
+        Submits a libusb async transfer and awaits its completion.
+        The completion callback fires on the Context's event thread
+        and bridges back to this loop via ``call_soon_threadsafe``;
+        multiple transfers (across endpoints or even on the same
+        endpoint) run truly concurrently inside libusb's scheduler.
         """
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self.read_sync, size, timeout)
+        future = loop.create_future()
+        transfer = self.device.handle.getTransfer()
+        transfer.setBulk(
+            self.address,
+            size or self.mps,
+            callback=lambda t: _resolve_transfer_future(
+                loop, future, t, _read_payload),
+            timeout=timeout or self._timeout,
+        )
+        map_usb_error(transfer.submit)
+        return await future
 
     def stream_reader(self, buffer_limit=65536):
         """
@@ -321,19 +394,26 @@ class BulkInEndpoint(BulkEndpoint):
 
 class BulkOutEndpoint(BulkEndpoint):
     def write_sync(self, data, timeout=None):
-        """Sync bulk write. For use inside run_in_executor."""
+        """Sync bulk write. See ``BulkInEndpoint.read_sync``."""
         return map_usb_error(
             self.device.handle.bulkWrite,
             self.address, data,
             timeout=timeout or self._timeout)
 
     async def write(self, data, timeout=None):
-        """
-        Bulk OUT transfer
-        """
+        """Bulk OUT transfer. See ``BulkInEndpoint.read``."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self.write_sync, data, timeout)
+        future = loop.create_future()
+        transfer = self.device.handle.getTransfer()
+        transfer.setBulk(
+            self.address,
+            data,
+            callback=lambda t: _resolve_transfer_future(
+                loop, future, t, _write_payload),
+            timeout=timeout or self._timeout,
+        )
+        map_usb_error(transfer.submit)
+        return await future
 
     def stream_writer(self):
         """
@@ -351,7 +431,8 @@ class InterruptEndpoint(Endpoint):
 
 class InterruptInEndpoint(InterruptEndpoint):
     def read_sync(self, size=0, timeout=None):
-        """Sync interrupt read. For use inside run_in_executor."""
+        """Sync interrupt read. For use inside run_in_executor or
+        outside an asyncio loop."""
         size = size or self.mps
         if size > self.mps:
             raise ValueError("Size too big for max packet size")
@@ -361,16 +442,27 @@ class InterruptInEndpoint(InterruptEndpoint):
             timeout=timeout or self._timeout)
 
     async def read(self, size=0, timeout=None):
-        """
-        Interrupt IN transfer
-        """
+        """Interrupt IN transfer (async)."""
+        size = size or self.mps
+        if size > self.mps:
+            raise ValueError("Size too big for max packet size")
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self.read_sync, size, timeout)
+        future = loop.create_future()
+        transfer = self.device.handle.getTransfer()
+        transfer.setInterrupt(
+            self.address,
+            size,
+            callback=lambda t: _resolve_transfer_future(
+                loop, future, t, _read_payload),
+            timeout=timeout or self._timeout,
+        )
+        map_usb_error(transfer.submit)
+        return await future
 
 class InterruptOutEndpoint(InterruptEndpoint):
     def write_sync(self, data, timeout=None):
-        """Sync interrupt write. For use inside run_in_executor."""
+        """Sync interrupt write. For use inside run_in_executor or
+        outside an asyncio loop."""
         if len(data) > self.mps:
             raise ValueError("Data buffer too big for max packet size")
         return map_usb_error(
@@ -379,12 +471,21 @@ class InterruptOutEndpoint(InterruptEndpoint):
             timeout=timeout or self._timeout)
 
     async def write(self, data, timeout=None):
-        """
-        Interrupt OUT transfer
-        """
+        """Interrupt OUT transfer (async)."""
+        if len(data) > self.mps:
+            raise ValueError("Data buffer too big for max packet size")
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self.write_sync, data, timeout)
+        future = loop.create_future()
+        transfer = self.device.handle.getTransfer()
+        transfer.setInterrupt(
+            self.address,
+            data,
+            callback=lambda t: _resolve_transfer_future(
+                loop, future, t, _write_payload),
+            timeout=timeout or self._timeout,
+        )
+        map_usb_error(transfer.submit)
+        return await future
 
 class BulkPair:
     """Paired bulk OUT/IN endpoints for command/response protocols."""
@@ -394,13 +495,27 @@ class BulkPair:
         self.in_ = ep_in
 
     def _sync_transfer(self, data, response_len, timeout):
+        """Sequential write-then-read, sync. For callers that aren't
+        in an asyncio loop. The async ``transfer`` is preferable —
+        it submits OUT and IN concurrently into libusb's scheduler."""
         self.out.write_sync(data, timeout)
         if response_len == 0:
             return b""
         return self.in_.read_sync(response_len, timeout)
 
     async def transfer(self, data, response_len, timeout=None):
-        """Write data, then read response_len bytes, atomically in one executor call."""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self._sync_transfer, data, response_len, timeout)
+        """Submit OUT and IN transfers concurrently and await both.
+
+        Both transfers post into libusb's async scheduler at the same
+        time, so the device sees the OUT command while the host
+        already has an IN transfer pending — required for devices
+        with small response FIFOs that need the host to drain data
+        in flight while the device is still processing commands."""
+        if response_len == 0:
+            await self.out.write(data, timeout=timeout)
+            return b""
+        _, rsp = await asyncio.gather(
+            self.out.write(data, timeout=timeout),
+            self.in_.read(response_len, timeout=timeout),
+        )
+        return rsp
