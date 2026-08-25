@@ -353,7 +353,7 @@ class ShiftIn(MpsseOperation):
     def gather(self, response: bytes):
         if isinstance(self.length, int):
             # Byte mode - return bytes
-            self.set_result(response: bytes)
+            self.set_result(response)
         else:
             # Bit mode - return (value, bit_count)
             bit_count = self.length[0]
@@ -411,7 +411,7 @@ class ShiftInOut(MpsseOperation):
     def gather(self, response: bytes):
         if isinstance(self.data, bytes):
             # Byte mode - return bytes
-            self.set_result(response: bytes)
+            self.set_result(response)
         else:
             # Bit mode - return (value, bit_count)
             bit_count = self.data[1]
@@ -557,7 +557,7 @@ class Mpsse:
 
                 total_response = sum(response_sizes)
                 if total_response > 0:
-                    response_blob = await self.channel.read(total_response: bytes)
+                    response_blob = await self.channel.read(total_response)
                 else:
                     response_blob = b''
 
